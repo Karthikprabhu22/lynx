@@ -30,6 +30,6 @@ def main(cfg_path: Path, log_level: int):
     # YOUR CODE GOES HERE! Keep the main functionality in src/lynx
     # est = lynx.models.Estimator()
 
-
 if __name__ == '__main__':
     main()
+  

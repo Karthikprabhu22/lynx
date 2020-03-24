@@ -1,0 +1,13 @@
+# The name of the simulation setup, this is
+# used to label the output maps in an hdf5 record.
+name: 'so_basic'
+# nside at which to generate the simulations
+nside: 64
+# PySM models to use in the simulations
+skymodel: ['d1', 's1', 'c2']
+# frequencies at which to generate maps.
+frequencies: [27., 39., 93., 145., 225., 280.]
+# sensitivities of each channel un uK_CMB amin.
+sensitivities: [35., 21., 2.6, 3.3, 6.3, 16.]
+# Gaussian beam fwhm in arcmin
+fwhm: [60., 60., 60., 60., 60., 60.]
