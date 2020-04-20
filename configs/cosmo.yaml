@@ -1,0 +1,11 @@
+identifier: planck_2018
+camb_ini: data/planck_2018_acc.ini
+model:
+  primordial:
+    varied:
+      r: [0., 0.1]
+    fixed:
+  lensing:
+    varied:
+      A_L: [1., 0.1]
+    fixed:

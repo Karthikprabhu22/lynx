@@ -15,6 +15,8 @@ dependencies:
   - pysm3
   - emcee
   - h5py
+  - pycamb
+  - namaster
   - pip:
      # add here only pip-packages that are not available in conda/conda-forge! E.g.:
      - jax
