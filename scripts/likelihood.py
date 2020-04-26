@@ -19,16 +19,10 @@ import emcee
 import healpy as hp 
 import matplotlib.pyplot as plt
 
-import jax
-import jax.numpy as np
-import numpy as old_np
+import numpy as np
+from scipy import stats
 
 from lynx import Masking
-
-import pdb
-
-# fallback to debugger on error
-sys.excepthook = ultratb.FormattedTB(mode='Verbose', color_scheme='Linux', call_pdb=1)
 
 _logger = logging.getLogger(__name__)
 
@@ -51,49 +45,85 @@ def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, l
                         level=log_level,
                         datefmt='%Y-%m-%d %H:%M',
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    # MASKING
-    # -------
-    # Read in masks from HDF5 record. These will be contained in
-    # a group called /powerspectrum/apodized
-    masking = Masking(mask_path)
-    for mask_name, wsp, mask, binning in masking.get_powerspectrum_tools():
-        # define log probability from data and model definition
-        lnPs = hoover.LogProb.load_data_from_hdf5_batch(data_path)
-        # prepare results list. The results have to be saved outside of the
-        # for loop, as the lnPs generator hogs to hdf5 resource.
-        cl = []
-        for i, lnP in enumerate(lnPs):
-            model_identifier = lnP.load_model_from_yaml(model_path)
-            mask_record = Path('spectra') / model_identifier / mask_name
-            record = mask_record / 'nmc{:04d}/cmb'.format(i)
+    
+    masking = lynx.Masking(mask_path)
+    
+    fitting_masks = list(masking.get_fitting_indices())
 
-            with h5py.File(data_path, 'r') as f:
-                mc_cl = f[str(record)][...]
-                cl.append(mc_cl)
-        # take just the BB spectrum (index 3)
-        cl = np.array(cl)[:, 3, :]
-        
-        print(cl.shape)
-        cl_mean = np.mean(cl, axis=0)
-        cl_covar = np.dot(cl.T, cl) / float(len(cl)) - cl_mean ** 2
-        cl_covar = np.dot((cl - cl_mean).T, (cl - cl_mean))
-        print(cl_mean.shape)
-        print(cl_covar.shape)
+    model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
 
-        ells = binning.get_effective_ells()
+    with h5py.File(data_path, 'r') as f:
+        maps = f['maps']
+        nmc = maps.attrs['monte_carlo']
 
-        fig, ax = plt.subplots(1, 1)
-        ax.errorbar(ells, cl_mean, yerr=np.sqrt(np.diag(cl_covar)))
-        plt.show()
+    for mask_name, wsp, mask, binning, beam in masking.get_powerspectrum_tools():
 
-        bpw_windows = wsp.get_bandpower_windows()
-        bb_bpw_windows = bpw_windows[3, :, 3, :]
+        for fitting_name, _ in fitting_masks:
+            
+            cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
+            
+            for imc in np.arange(int(nmc / 2)):    
+                
+                hdf5_record = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc * 2) / 'powerspectra' / mask_name / 'cmb')
 
-        print(cosmo_path)
-        lnP = lynx.BBLogLike(data=(cl_mean, cl_covar), bpw_window_function=bb_bpw_windows, model_config_path=cosmo_path)
-        res = minimize(lnP, (0.07, 1.1), args=(True), method='Nelder-Mead')
-        print(res)
+                with h5py.File(data_path, 'r') as f:
+                    cl_mc[imc] = f[hdf5_record][...]
 
+            ee_mean, ee_cov = compute_mean_cov(cl_mc[:, 0])
+            bb_mean, bb_cov = compute_mean_cov(cl_mc[:, 3])
+
+            bpw_windows = wsp.get_bandpower_windows()
+            ee_bpw_windows = bpw_windows[0, :, 0, :]
+            bb_bpw_windows = bpw_windows[3, :, 3, :]
+            bpws = binning.get_effective_ells()
+
+            with h5py.File("data/planck_2018_acc.h5", 'r') as f:
+                ee = f['lensed_scalar'][:ee_bpw_windows.shape[-1], 1]
+                bb = f['lensed_scalar'][:bb_bpw_windows.shape[-1], 2]
+
+            fig, ax = plt.subplots(1, 1)
+            ax.set_title("BB bandpower covariance matrix")
+            ax.imshow(bb_cov, origin='lower', extent=[bpws[0], bpws[-1], bpws[0], bpws[-1]])
+            ax.set_xlabel(r"$\ell_b$")
+            ax.set_ylabel(r"$\ell_b$")
+            fig.savefig("reports/figures/bb_cov.pdf", bbox_inches='tight')
+
+            fig, ax = plt.subplots(1, 1)
+            ax.plot(bpws, np.dot(ee_bpw_windows, ee), 'k-', label='Binned theory input')
+            ax.errorbar(bpws, ee_mean, np.sqrt(np.diag(ee_cov)), color='k', fmt='o', label='Cleaned estimate')
+            ax.set_yscale('log')
+            ax.set_xlabel(r"$\ell_b$")
+            ax.set_ylabel(r"$C_{\ell_b}^{\rm EE}~[{\rm \mu K}^2]$")
+            ax.legend()
+            fig.savefig("reports/figures/ee_recovered.pdf", bbox_inches='tight')
+
+            lnP = lynx.BBLogLike(data=(bb_mean, bb_cov), bpw_window_function=bb_bpw_windows, model_config_path=cosmo_path)
+            res = minimize(lnP, lnP.theta_0(), args=(True), method='Nelder-Mead')
+
+            fig, ax = plt.subplots(1, 1)
+            samples = np.random.multivariate_normal(res.x, lnP.covariance(res.x), 100)
+            for sample in samples:
+                ax.plot(bpws, lnP.model(sample), 'C0-', alpha=0.05)
+            ax.plot(bpws, np.dot(bb_bpw_windows, bb), 'k-', label='Binned theory input')
+            ax.errorbar(bpws, bb_mean, np.sqrt(np.diag(bb_cov)), color='k', fmt='o', label='Cleaned estimate')
+            ax.set_yscale('log')
+            ax.set_xlabel(r"$\ell_b$")
+            ax.set_ylabel(r"$C_{\ell_b}^{\rm BB}~[{\rm \mu K}^2]$")
+            ax.legend()
+            fig.savefig("reports/figures/bb_recovered.pdf", bbox_inches='tight')
+
+            print(res.x)
+            print(np.sqrt(np.diag(lnP.covariance(res.x))))
+            print('Reduced chi2: ', lnP.chi2(res.x))
+
+def compute_mean_cov(arr):
+    assert arr.ndim == 2
+    nmc = float(arr.shape[0])
+    mean = np.mean(arr, axis=0)
+    diff = arr - mean[None, :]
+    cov = diff[:, None, :] * diff[:, :, None]
+    cov = np.sum(cov, axis=0) / nmc
+    return mean, cov
 
 if __name__ == '__main__':
     main()

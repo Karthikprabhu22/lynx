@@ -4,11 +4,13 @@ name: 'so_basic'
 # nside at which to generate the simulations
 nside: 128
 # PySM models to use in the simulations
-skymodel: ['d1', 's1', 'c2']
+skymodel: ['d1', 's1']
+cosmo_path: 'data/planck_2018_acc.ini'
 # frequencies at which to generate maps.
 frequencies: [27., 39., 93., 145., 225., 280.]
 # sensitivities of each channel un uK_CMB amin.
 sensitivities: [35., 21., 2.6, 3.3, 6.3, 16.]
 # Gaussian beam fwhm in arcmin
 fwhm: [60., 60., 60., 60., 60., 60.]
-monte_carlo: 30
+monte_carlo: 100
+half_mission_noise: True

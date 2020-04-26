@@ -29,13 +29,9 @@ class BBLogLike(object):
         self.cosmo_setup()
 
     def __call__(self, theta, ret_neg=False):
-        pars = {k: v for k, v in zip(self.free_parameters, theta)}
         # if a bandpower window function has been defined, apply that
         # to the theoretical power spectrum
-        if self.apply_filtering:
-            model = self._Cl_BB_bpw(**pars)
-        else:
-            model = self._Cl_BB(**pars)
+        model = self.model(theta)
         lnprior = self._lnprior(theta)
         lnp = lnprior + _log_gaussian(model, self.obs, self.inv_cov)
         if ret_neg:
@@ -47,6 +43,15 @@ class BBLogLike(object):
         Model
         """
         return msg
+
+    def model(self, theta):
+        pars = {k: v for k, v in zip(self.free_parameters, theta)}
+        # if a bandpower window function has been defined, apply that
+        # to the theoretical power spectrum
+        if self.apply_filtering:
+            return self._Cl_BB_bpw(**pars)
+        else:
+            return self._Cl_BB(**pars)
 
     def bpw_window_function_setup(self, bpw_window_function):
         """ Method to set up filtering of theoretical power spectrum
@@ -79,6 +84,7 @@ class BBLogLike(object):
     def data_setup(self, data):
         obs, cov = data
         self.obs = obs
+        self.cov = cov
         self.inv_cov = np.linalg.inv(cov)
 
     def load_model_from_yaml(self, fpath):
@@ -188,6 +194,14 @@ class BBLogLike(object):
         """
         hfunc = hessian(self.__call__, argnums=0)(theta, True)
         return np.linalg.inv(hfunc)
+
+    def chi2(self, theta):
+        res = self.model(theta) - self.obs
+        res = res[4:-3]
+        cov = self.cov[4:-3, 4:-3]
+        inv_cov = np.linalg.inv(cov)
+        dof = float(len(res) - len(self.free_parameters))
+        return np.dot(res.T, np.dot(inv_cov, res)) / dof
 
     def _Cl_BB_bpw(self, r, A_L):
         return np.dot(self.bpw_window_function, self._Cl_BB(r, A_L))

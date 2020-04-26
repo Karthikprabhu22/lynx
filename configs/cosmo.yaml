@@ -3,9 +3,9 @@ camb_ini: data/planck_2018_acc.ini
 model:
   primordial:
     varied:
-      r: [0., 0.1]
+      r: [0., 0.2]
     fixed:
   lensing:
     varied:
-      A_L: [1., 0.1]
+      A_L: [1., 0.5]
     fixed:

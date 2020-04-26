@@ -51,6 +51,12 @@ class Masking(object):
             # save to file
             wsp.write_to(str(path))
     
+    def save_fitting_mask(self, name, mask):
+        with h5py.File(self.hdf5_path, 'a') as f:
+            dset = f.require_dataset(self.cfg['masks']['fitting'][name]['record'], shape=mask.shape, dtype=mask.dtype)
+            dset[...] = mask
+
+
     def get_nmt_workspaces(self, recalculate=False):
         if recalculate:
             self.calculate_mode_coupling()
@@ -62,9 +68,24 @@ class Masking(object):
     def calculate_apodizations(self, mask_in):
         for value in self.masks['powerspectrum'].values():
             apo_mask = nmt.mask_apodization(mask_in, **value['nmt_apo']['args'])
-            with h5py.File(self.hdf5_path, 'r') as f:
+            with h5py.File(self.hdf5_path, 'a') as f:
                 dset = f.require_dataset(value['record'], shape=apo_mask.shape, dtype=apo_mask.dtype)
                 dset[...] = apo_mask
+
+    def get_fitting_indices(self):
+        for name, value in self.masks['fitting'].items():
+            # read in fitting mask
+            with h5py.File(self.hdf5_path, 'r') as f:
+                mask = f[value['record']][...].astype(int)
+            
+            # remove the 0 region, which is masked out
+            regions = set(mask)
+            if 0 in regions:
+                regions.remove(0)
+            # loop through the fitting regions, and return
+            # the corresponding healpix indices
+            fitting_parameters = [(i, np.where(mask==i)[0].astype(int)) for i in regions]
+            yield name, fitting_parameters
 
     def get_powerspectrum_tools(self, recalculate=False):
         if recalculate:
