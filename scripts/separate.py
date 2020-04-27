@@ -5,7 +5,6 @@ from pathlib import Path
 import sys
 
 import click
-from IPython.core import ultratb
 
 import h5py
 import yaml
@@ -18,10 +17,6 @@ import emcee
 import healpy as hp
 
 import numpy as np
-import pdb
-
-# fallback to debugger on error
-sys.excepthook = ultratb.FormattedTB(mode='Verbose', color_scheme='Linux', call_pdb=1)
 
 _logger = logging.getLogger(__name__)
 
@@ -49,10 +44,10 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
 
     with h5py.File(data_path, 'r') as f:
-        maps = f['maps']
-        nmc = maps.attrs['monte_carlo']
-        frequencies = maps.attrs['frequencies']
-        nside = maps.attrs['nside']
+        sky_config = yaml.load(f.attrs['config'], Loader=yaml.FullLoader)
+        nmc = sky_config['monte_carlo']
+        frequencies = np.array(sky_config['frequencies'])
+        nside = sky_config['nside']
 
     amplitude_output_shape = (2, hp.nside2npix(nside))
     parameter_output_shape = (hp.nside2npix(nside),)

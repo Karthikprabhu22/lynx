@@ -6,7 +6,6 @@ import sys
 import yaml
 
 import click
-from IPython.core import ultratb
 
 import h5py
 import yaml
@@ -50,8 +49,8 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
 
     with h5py.File(data_path, 'r') as f:
-        maps = f['maps']
-        nmc = maps.attrs['monte_carlo']
+        sky_config = yaml.load(f.attrs['config'], Loader=yaml.FullLoader)
+        nmc = sky_config['monte_carlo']
 
     for mask_name, wsp, mask, binning, beam in masking.get_powerspectrum_tools():
         # get the bandpower window function, which will be saved with the
