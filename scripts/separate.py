@@ -114,6 +114,10 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
                         T_bar_dset = opt.require_dataset(component, shape=amplitude_output_shape, dtype=T_bar.dtype)
                         T_bar_dset[..., indices] = T_bar
 
+                        N_T = lnP.get_amplitdue_covariance(res.x, component=component)
+                        N_T_dset = opt.require_dataset(component + "_N_T", shape=amplitude_output_shape, dtype=N_T.dtype)
+                        N_T_dset[..., indices] = N_T 
+
                     for i, par in enumerate(lnP.free_parameters):
                         par_dset = opt.require_dataset(par, shape=parameter_output_shape, dtype=res.x[i].dtype)
                         par_dset[indices] = res.x[i]

@@ -54,7 +54,7 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
 
     freqs = old_np.array(cfg['frequencies']) * u. GHz
     nside = cfg['nside']
-    components = cfg['skymodel']
+    components = cfg['skymodel']['args']
     sensitivities = cfg['sensitivities']
     nmc = cfg['monte_carlo']
     beams = cfg['fwhm']
@@ -71,7 +71,7 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
     Number of Monte Carlo simulations: {:d}
     """.format(", ".join([str(f) for f in freqs]), nside, ", ".join(components), ", ".join([str(s) for s in sensitivities]), nmc))
     # Generate sky signal
-    sky = pysm.Sky(nside=nside, preset_strings=components)
+    sky = pysm.Sky(nside=nside, **components)
     fgnd = (sky.get_emission(f) for f in freqs)
     fgnd = (hp.smoothing(s, fwhm=b / 60. * np.pi / 180., verbose=False)[None, 1:, ...] for b, s in zip(beams, fgnd))
     fgnd = np.concatenate(list(fgnd))
@@ -80,8 +80,7 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
     sens = np.array(sensitivities) * u.uK_CMB
     sens = np.array([w.to(u.uK_RJ, equivalencies=u.cmb_equivalencies(f)) for w, f in zip(sens, freqs)])
     noise_generator = WhiteNoise(sens=sens)
-    
-    noise = old_np.asarray(noise_generator.map(nside))
+
     cov = noise_generator.get_pix_var_map(nside)
 
     logging.info(r"""
@@ -89,42 +88,36 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
     """.format(str(outpath)))
 
     with h5py.File(outpath, 'a') as f:
-        
+
         f.attrs.update({'config': yaml.dump(cfg)})
-        
         maps = f.require_group('maps')
         monte_carlo = maps.require_group('monte_carlo')
         components = maps.require_group('components')
-        
+
         cov_dset = monte_carlo.require_dataset('cov', shape=cov.shape, dtype=cov.dtype)
         cov_dset[...] = cov
-        maps.attrs.update(cfg)
-        
         for imc in np.arange(nmc)[::2]:
-            
-            logging.debug(r"""
-            CMB MC: {:d}
-            """.format(imc))
-            
-            cmb = get_cmb_realization(nside, cosmo_path, beams, freqs)
-            
+
+            logging.debug(r"""CMB MC: {:d}""".format(imc))
+
+            cmb = get_cmb_realization(nside, cosmo_path, beams, freqs, seed=imc)
+
             for j in range(imc, imc + 2):
-                
+
                 logging.debug(r"""
                 Noise mc: {:d}
                 """.format(j))
-                
+
                 data = fgnd + cmb + noise_generator.map(nside, seed=j)
-                
+
                 logging.debug(r"""
                 data shape: {:s}
                 """.format(str(data.shape)))
-                
+
                 data_dset = monte_carlo.require_dataset('data_mc{:04d}'.format(j), shape=data.shape, dtype=data.dtype)
                 data_dset[...] = data
 
-
-def get_cmb_realization(nside, cl_path, beams, frequencies):
+def get_cmb_realization(nside, cl_path, beams, frequencies, seed=100):
     with h5py.File(cl_path, 'r') as f:
         cl_total = np.swapaxes(f['lensed_scalar'][...], 0, 1)
     cmb = hp.synfast(cl_total, nside, new=True, verbose=False)

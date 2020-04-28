@@ -6,9 +6,9 @@ nside: 128
 # PySM models to use in the simulations
 skymodel: 
   args: 
-    component_config: 
-      - 'configs/pysm-models/dust_fixed_spec.cfg'
-      - 'configs/pysm-models/sync_fixed_spec.cfg'
+    preset_strings: 
+      - 'd0'
+      - 's0'
 cosmo_path: 'data/planck_2018_acc.ini'
 # frequencies at which to generate maps.
 frequencies: [27., 39., 93., 145., 225., 280.]

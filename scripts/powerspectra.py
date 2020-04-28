@@ -105,8 +105,38 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
                         cl = compute_nmt_spectra(T_bar_1, T_bar_2, mask, wsp)
                         cl_dset = spec.require_dataset(component, dtype=cl.dtype, shape=cl.shape)             
                         cl_dset[...] = cl
-        
 
+                        if component == 'cmb':
+                            N_T_1 = f[hdf5_record_1]['cmb'+'_N_T'][...]
+                            N_T_2 = f[hdf5_record_2]['cmb'+'_N_T'][...]
+
+                            noise_mc = 30
+                            cl_n = np.zeros((noise_mc, binning.get_n_bands()))
+
+                            for k in range(noise_mc):
+                                n1 = get_realization(N_T_1)
+                                n2 = get_realization(N_T_2)
+                                cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
+
+                            cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
+
+                            cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
+                            cl_n_dset[...] = cl_n_mean
+                            cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
+                            cl_n_dset[...] = cl_n_cov
+
+def compute_mean_cov(arr):
+    assert arr.ndim == 2
+    nmc = float(arr.shape[0])
+    mean = np.mean(arr, axis=0)
+    diff = arr - mean[None, :]
+    cov = diff[:, None, :] * diff[:, :, None]
+    cov = np.sum(cov, axis=0) / nmc
+    return mean, cov
+
+        
+def get_realization(N_T):
+    return np.random.randn(*N_T.shape) * np.sqrt(N_T)
 
 def compute_nmt_spectra(qu1, qu2, mask, wsp):
     f1 = nmt.NmtField(mask, qu1, purify_b=True)
