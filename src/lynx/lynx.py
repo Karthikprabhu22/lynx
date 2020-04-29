@@ -56,6 +56,10 @@ class Masking(object):
             dset = f.require_dataset(self.cfg['masks']['fitting'][name]['record'], shape=mask.shape, dtype=mask.dtype)
             dset[...] = mask
 
+    def get_binary(self):
+        with h5py.File(self.hdf5_path, 'r') as f:
+            mask = f[self.cfg['masks']['binary']['record']][...]
+        return mask
 
     def get_nmt_workspaces(self, recalculate=False):
         if recalculate:

@@ -60,7 +60,9 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
         with h5py.File(data_path, 'a') as f:
             data = f['maps/monte_carlo/data_mc{:04d}'.format(imc)][...]
             cov = f['maps/monte_carlo/cov'][...]
-        
+        print(data.nbytes * 100 / 1e9)
+        print(cov.nbytes * 100 / 1e9)
+        sys.exit()
         for fitting_name, fitting_parameters in fitting_masks:
 
             hdf5_record = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc))

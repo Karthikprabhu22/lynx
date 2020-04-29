@@ -4,8 +4,6 @@ masks:
   binary:
     record: /ns0128/binary
   fitting:
-    one:
-      record: /ns0128/binary
     nside_4:
       record: /ns0128/nside_4
   powerspectrum:

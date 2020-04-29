@@ -4,10 +4,8 @@ masks:
   binary:
     record: /ns0128/binary
   fitting:
-    one:
-      record: /ns0128/binary
-    nside_4:
-      record: /ns0128/nside_4
+    nside_8:
+      record: /ns0128/nside_8
   powerspectrum:
     linear_lmin30lmax383:
       record: /ns0128/apodized/basic

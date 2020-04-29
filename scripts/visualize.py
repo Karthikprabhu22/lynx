@@ -35,20 +35,16 @@ _logger = logging.getLogger(__name__)
                 type=click.Path(exists=False), help='path to model configuration')
 @click.option('-p', '--mask_path', 'mask_path', required=True,
                 type=click.Path(exists=False), help='path to masking configuration')
-@click.option('-c', '--cosmo_path', 'cosmo_path', required=True,
-                type=click.Path(exists=False), help='path to cosmo configuration')
 @click.option('--quiet', 'log_level', flag_value=logging.WARNING, default=True)
 @click.option('-v', '--verbose', 'log_level', flag_value=logging.INFO)
 @click.option('-vv', '--very-verbose', 'log_level', flag_value=logging.DEBUG)
 @click.version_option(lynx.__version__)
-def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, log_level: int):
+def main(data_path: Path, mask_path: Path, model_path: Path, log_level: int):
     logging.basicConfig(stream=sys.stdout,
                         level=log_level,
                         datefmt='%Y-%m-%d %H:%M',
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
     masking = lynx.Masking(mask_path)
-    
     fitting_masks = list(masking.get_fitting_indices())
 
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
@@ -56,94 +52,44 @@ def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, l
     with h5py.File(data_path, 'r') as f:
         sky_config = yaml.load(f.attrs['config'], Loader=yaml.FullLoader)
         nmc = sky_config['monte_carlo']
+        frequencies = np.array(sky_config['frequencies'])
+        nside = sky_config['nside']
 
-    for mask_name, wsp, mask, binning, beam in masking.get_powerspectrum_tools():
+    amplitude_output_shape = (2, hp.nside2npix(nside))
+    parameter_output_shape = (hp.nside2npix(nside),)
+        
+    for fitting_name, fitting_parameters in fitting_masks:
+        T_bar = {comp: np.zeros(amplitude_output_shape) for comp in lnP._components}
+        par = {par: np.zeros(parameter_output_shape) for par in lnP.free_parameters}
+        for imc in range(nmc):
+            logging.info(r"""
+            Working on Monte Carlo realization: {:d}
+            """.format(imc))
+            hdf5_record = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc))
 
-        for fitting_name, _ in fitting_masks:
+            logging.info(r"""
+            Working on fitting scheme: {:s}
+            """.format(fitting_name)) 
+            
+            with h5py.File(data_path, 'a') as f:
+                # Create a group which contains results for this sky
+                # patch, model, and MC realization.
+                opt = f[hdf5_record]
+                # Create a dataset for the whole sky, and log the
+                # results for this patch in the corresponding indices.
+                # Do the same for the spectral parameters.
+                for component in lnP._components:
+                    T_bar[component] += opt[component][...]
 
-            results_dir = Path("data/results") / "_".join([mask_name, model_identifier, fitting_name])
-            results_dir.mkdir(exist_ok=True, parents=True)
+                for parameter in lnP.free_parameters:
+                    par[parameter] += opt[parameter][...]
 
-            cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
-            cln_bb_cov = np.zeros((int(nmc / 2), binning.get_n_bands(), binning.get_n_bands()))
-            for imc in np.arange(int(nmc / 2)):    
+        T_bar = {key: value / float(nmc) for key, value in T_bar.items()}
+        par = {key: value / float(nmc) for key, value in par.items()}
 
-                hdf5_record = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc * 2) / 'powerspectra' / mask_name / 'cmb')
-
-                with h5py.File(data_path, 'r') as f:
-                    cl_mc[imc] = f[hdf5_record][...]
-                    #cln_bb_cov[imc] = f[hdf5_record + '_cln_cov'][...]
-
-
-            #cln_bb_cov = np.mean(cln_bb_cov, axis=0)
-
-            ee_mean, ee_cov = compute_mean_cov(cl_mc[:, 0])
-            bb_mean, bb_cov = compute_mean_cov(cl_mc[:, 3])
-
-            bpw_windows = wsp.get_bandpower_windows()
-            ee_bpw_windows = bpw_windows[0, :, 0, :]
-            bb_bpw_windows = bpw_windows[3, :, 3, :]
-            bpws = binning.get_effective_ells()
-
-            with h5py.File("data/planck_2018_acc.h5", 'r') as f:
-                ee = f['lensed_scalar'][:ee_bpw_windows.shape[-1], 1]
-                bb = f['lensed_scalar'][:bb_bpw_windows.shape[-1], 2]
-
-            fig, ax = plt.subplots(1, 1)
-            ax.set_title("BB bandpower covariance matrix")
-            ax.imshow(bb_cov, origin='lower', extent=[bpws[0], bpws[-1], bpws[0], bpws[-1]])
-            ax.set_xlabel(r"$\ell_b$")
-            ax.set_ylabel(r"$\ell_b$")
-            fig.savefig(results_dir / "bb_cov.pdf", bbox_inches='tight')
-
-            fig, ax = plt.subplots(1, 1)
-            ax.plot(bpws, np.dot(ee_bpw_windows, ee), 'k-', label='Binned theory input')
-            ax.errorbar(bpws, ee_mean, np.sqrt(np.diag(ee_cov)), color='k', fmt='o', label='Cleaned estimate')
-            ax.set_yscale('log')
-            ax.set_xlabel(r"$\ell_b$")
-            ax.set_ylabel(r"$C_{\ell_b}^{\rm EE}~[{\rm \mu K}^2]$")
-            ax.legend()
-            fig.savefig(results_dir / "ee_recovered.pdf", bbox_inches='tight')
-
-            lnP = lynx.BBLogLike(data=(bb_mean, bb_cov), bpw_window_function=bb_bpw_windows, model_config_path=cosmo_path)
-            res = minimize(lnP, lnP.theta_0(), args=(True), method='Nelder-Mead')
-
-            fig, ax = plt.subplots(1, 1)
-            samples = np.random.multivariate_normal(res.x, lnP.covariance(res.x), 100)
-            samples = np.array([lnP.model(sample) for sample in samples])
-            #samples += np.random.multivariate_normal(np.zeros_like(bpws), cln_bb_cov, 100)
-            pp_mean = np.mean(samples, axis=0)
-            pp_std = np.std(samples, axis=0)
-            ax.errorbar(bpws+1, pp_mean, color='C0', fmt='o', yerr=pp_std)
-            for s in samples:
-                ax.plot(bpws, s, 'C1', alpha=0.1)
-            #for sample in samples:
-            #    ax.plot(bpws, lnP.model(sample) + , 'C1-', alpha=0.05)
-            ax.plot(bpws, np.dot(bb_bpw_windows, bb), 'k-', label='Binned theory input')
-            #ax.plot(bpws, np.sqrt(np.diag(cln_bb_cov)), 'g-', label=r'$\sigma(C_\ell^{\rm BB})$')
-            ax.errorbar(bpws, bb_mean, np.sqrt(np.diag(bb_cov)), color='k', fmt='o', label='Cleaned estimate')
-            ax.set_yscale('log')
-            ax.set_ylim(1e-7, 4e-6)
-            ax.set_xlabel(r"$\ell_b$")
-            ax.set_ylabel(r"$C_{\ell_b}^{\rm BB}~[{\rm \mu K}^2]$")
-            ax.legend()
-            fig.savefig(results_dir / "bb_recovered.pdf", bbox_inches='tight')
-
-            plot_fisher(res.x, lnP.covariance(res.x), truth=[1., 0.], fpath=results_dir / "ellipses.pdf", xlabel=r"$A_L$", ylabel=r"$r$")
-
-            print(res.x)
-            print(np.sqrt(np.diag(lnP.covariance(res.x))))
-            print('Reduced chi2: ', lnP.chi2(res.x))
-
-            np.save(results_dir / "parameter_ML.npy", res.x)
-            np.save(results_dir / "parameter_covariance.npy", lnP.covariance(res.x))
-
-            results = pd.DataFrame({
-                'mean': pd.Series(res.x, index=lnP.free_parameters),
-                '1-sigma': pd.Series(np.sqrt(np.diag(lnP.covariance(res.x))), index=lnP.free_parameters)
-            })
-            print(results)
-            results.to_csv(results_dir / "results.csv")
+        hp.mollview(T_bar['cmb'][0])
+        hp.mollview(par['beta_d'])
+        plt.show()
 
 def plot_fisher(mean, cov, truth=None, fpath=None, xlabel=None, ylabel=None):
     nb = 128

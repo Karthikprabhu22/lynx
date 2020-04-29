@@ -33,11 +33,12 @@ _logger = logging.getLogger(__name__)
                 type=click.Path(exists=False), help='path to model configuration')
 @click.option('-p', '--mask_path', 'mask_path', required=True,
                 type=click.Path(exists=True), help='path to power spectrum configuration')
+@click.option('-n', '--estimate_noise/--no-estimate_noise', 'estimate_noise', help="estimate noise power spectrum", default=False)
 @click.option('--quiet', 'log_level', flag_value=logging.WARNING, default=True)
 @click.option('-v', '--verbose', 'log_level', flag_value=logging.INFO)
 @click.option('-vv', '--very-verbose', 'log_level', flag_value=logging.DEBUG)
 @click.version_option(lynx.__version__)
-def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
+def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: bool, log_level: int):
     logging.basicConfig(stream=sys.stdout,
                         level=log_level,
                         datefmt='%Y-%m-%d %H:%M',
@@ -113,17 +114,19 @@ def main(data_path: Path, model_path: Path, mask_path: Path, log_level: int):
                             noise_mc = 30
                             cl_n = np.zeros((noise_mc, binning.get_n_bands()))
 
-                            for k in range(noise_mc):
-                                n1 = get_realization(N_T_1)
-                                n2 = get_realization(N_T_2)
-                                cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
+                            if estimate_noise:
 
-                            cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
+                                for k in range(noise_mc):
+                                    n1 = get_realization(N_T_1)
+                                    n2 = get_realization(N_T_2)
+                                    cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
 
-                            cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
-                            cl_n_dset[...] = cl_n_mean
-                            cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
-                            cl_n_dset[...] = cl_n_cov
+                                cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
+
+                                cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
+                                cl_n_dset[...] = cl_n_mean
+                                cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
+                                cl_n_dset[...] = cl_n_cov
 
 def compute_mean_cov(arr):
     assert arr.ndim == 2
