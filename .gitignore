@@ -14,6 +14,15 @@ __pycache__/*
 */.ipynb_checkpoints/*
 .DS_Store
 
+# mypy cache
+.mypy_cache/**
+
+# vscode repo settings
+.vscode/**
+
+# Reports
+reports/**
+
 # Virtual environment files
 env/
 
