@@ -68,14 +68,13 @@ def main(data_path: Path, mask_path: Path, model_path: Path, lkl_path: Path, log
             results_dir = Path("data/results") / data_cfg['identifier'] / mask_name / fitting_identifier / model_identifier / lkl_cfg['identifier']
             results_dir.mkdir(exist_ok=True, parents=True)
 
-            hdf5_record_cmb = str(Path(model_identifier) / fitting_identifier / 'spectra' / mask_name / 'cmb')
-            hdf5_record_dust = str(Path(model_identifier) / fitting_identifier / 'spectra' / mask_name / 'dustmbb')
+            hdf5_record = Path(model_identifier) / fitting_identifier / 'spectra' / mask_name
 
             with h5py.File(hdf5_path, 'r') as f:
-                ee_mean, ee_cov = compute_mean_cov(f[hdf5_record_cmb][:, 0])
-                bb_mean, bb_cov = compute_mean_cov(f[hdf5_record_cmb][:, 3])
-                ee_mean_dust, ee_cov_dust = compute_mean_cov(f[hdf5_record_dust][:, 0])
-                bb_mean_dust, bb_cov_dust = compute_mean_cov(f[hdf5_record_dust][:, 3])
+                ee_mean, ee_cov = compute_mean_cov(f[f"{hdf5_record}/cmb"][:, 0])
+                bb_mean, bb_cov = compute_mean_cov(f[f"{hdf5_record}/cmb"][:, 3])
+                bb_mean_dust, bb_cov_dust = compute_mean_cov(f[f"{hdf5_record}/dustmbb"][:, 3])
+                ee_mean_dust, ee_cov_dust = compute_mean_cov(f[f"{hdf5_record}/dustmbb"][:, 0])
 
             bpw_windows = wsp.get_bandpower_windows()
             ee_bpw_windows = bpw_windows[0, :, 0, :]

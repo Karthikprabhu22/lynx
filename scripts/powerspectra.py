@@ -38,8 +38,11 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
     with open(data_path) as f:
         data_cfg = yaml.load(f, Loader=yaml.FullLoader)
 
+    data_id = data_cfg['identifier']
     nmc = data_cfg['monte_carlo']
     hdf5_path = data_cfg['hdf5_path']
+
+    logging.info(f"Working on data: {data_id}")
 
     masking = lynx.Masking(mask_path)
     fitting_masks = list(masking.get_fitting_indices())
@@ -51,15 +54,11 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
         # computed spectra for comparison with theory later.
         bpw_window_function = wsp.get_bandpower_windows()
 
-        logging.info(r"""
-        Working on power spectra for mask: {:s}
-        """.format(mask_name))
+        logging.info(f"Working on power spectra for mask: {mask_name}")
 
         for fitting_name, _ in fitting_masks:
             
-            logging.info(r"""
-            Working on fitting scheme: {:s}
-            """.format(fitting_name)) 
+            logging.info(f"Working on fitting scheme: {fitting_name}") 
 
             hdf5_record_amp = Path(model_identifier) / fitting_name
             hdf5_record_spec = hdf5_record_amp / 'spectra' / mask_name
@@ -67,7 +66,7 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
             with h5py.File(hdf5_path, 'a') as f:
                 # Create a group which contains results for this sky
                 # patch, model, and MC realization.
-                spec = f.require_group(hdf5_record_spec.as_posix())
+                spec = f.require_group(f"{hdf5_record_spec}")
                 spec.attrs.update({'config': yaml.dump(masking.cfg)})
                 # save bandpower window function
                 dset = spec.require_dataset('bpw_window_function', shape=bpw_window_function.shape, dtype=bpw_window_function.dtype)
@@ -79,23 +78,23 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
                 # results for this patch in the corresponding indices.
                 # Do the same for the spectral parameters.
                 for component in lnP._components:
+                    logging.info(f"Working on component: {component}")
                     cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
                     for ispec, imc in enumerate(np.arange(nmc)[::2]):
                         jmc = imc + 1
-                        logging.info(r"""
-                        Working on Monte Carlo realizations: {:d}, {:d}
-                        """.format(imc, jmc))
-                        T_bar_1 = f[hdf5_record_amp.as_posix()][component][imc, ...]
-                        T_bar_2 = f[hdf5_record_amp.as_posix()][component][jmc, ...]
+                        logging.info(f"Working on Monte Carlo realizations: {imc:d}, {jmc:d}")
+                        T_bar_1 = f[f"{hdf5_record_amp / component}_T_bar"][imc, ...]
+                        T_bar_2 = f[f"{hdf5_record_amp / component}_T_bar"][jmc, ...]
                         cl_mc[ispec] = compute_nmt_spectra(T_bar_1, T_bar_2, mask, wsp)
 
                         if component == 'cmb':
-                            N_T_1 = f[hdf5_record_amp.as_posix()]['cmb'+'_N_T'][...]
-                            N_T_2 = f[hdf5_record_amp.as_posix()]['cmb'+'_N_T'][...]
+                            N_T_1 = f[f"{hdf5_record_amp}"]['cmb_N_T'][...]
+                            N_T_2 = f[f"{hdf5_record_amp}"]['cmb_N_T'][...]
 
                             noise_mc = 30
                             cl_n = np.zeros((noise_mc, binning.get_n_bands()))
 
+                    logging.info(f"Saving in {spec.name}/{component}")
                     cl_dset = spec.require_dataset(component, dtype=cl_mc.dtype, shape=cl_mc.shape)             
                     cl_dset[...] = cl_mc
                 
@@ -107,10 +106,9 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
                         cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
 
                     cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
-
-                    cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
+                    cl_n_dset = spec.require_dataset(f"{component}_cln_mean", dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
                     cl_n_dset[...] = cl_n_mean
-                    cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
+                    cl_n_dset = spec.require_dataset(f"{component}_cln_cov", dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
                     cl_n_dset[...] = cl_n_cov
 
 def compute_mean_cov(arr):

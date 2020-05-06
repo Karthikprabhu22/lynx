@@ -56,17 +56,19 @@ def main(cfg_path: Path, log_level: int):
     beams = cfg['fwhm']
     outpath = cfg['hdf5_path']
     half_mission_noise = cfg['half_mission_noise']
-    cosmo_path = cfg['cosmo_path'])
+    cosmo_path = cfg['cosmo_path']
+    
     if half_mission_noise:
         sensitivities = [s * np.sqrt(2.) for s in sensitivities]
     
-    logging.info(r"""
-    Frequencies: {:s}
-    Nside: {:d}
-    Components: {:s}
-    Sensitivities: {:s}
-    Number of Monte Carlo simulations: {:d}
-    """.format(", ".join([str(f) for f in freqs]), nside, ", ".join(components), ", ".join([str(s) for s in sensitivities]), nmc))
+    logging.info(f"""
+    Frequencies: {freqs!s}
+    Nside: {nside:04d}
+    Components: {components!s}
+    Sensitivities: {sensitivities!s}
+    Number of Monte Carlo Simulations: {nmc:05d}
+    """)
+
     # Generate sky signal
     sky = pysm.Sky(nside=nside, **components)
     fgnd = (sky.get_emission(f) for f in freqs)
@@ -80,12 +82,9 @@ def main(cfg_path: Path, log_level: int):
 
     cov = noise_generator.get_pix_var_map(nside)
 
-    logging.info(r"""
-    Output path: {:s}
-    """.format(str(outpath)))
+    logging.info(f"Output path: {outpath}")
 
     with h5py.File(outpath, 'a') as f:
-
         f.attrs.update({'config': yaml.dump(cfg)})
         maps = f.require_group('maps')
         monte_carlo = maps.require_group('monte_carlo')
@@ -98,26 +97,22 @@ def main(cfg_path: Path, log_level: int):
         
         for imc in np.arange(nmc)[::2]:
 
-            logging.debug(r"""CMB MC: {:d}""".format(imc))
+            logging.info(f"Working on CMB MC: {imc:04d}")
 
             cmb = get_cmb_realization(nside, cosmo_path, beams, freqs, seed=imc)
 
             for j in range(imc, imc + 2):
 
-                logging.debug(r"""
-                Noise mc: {:d}
-                """.format(j))
+                logging.info(f"Working on noise MC: {j:04d}")
 
                 data = fgnd + cmb + noise_generator.map(nside, seed=j)
 
-                logging.debug(r"""
-                data shape: {:s}
-                """.format(str(data.shape)))
+                logging.debug(f"Data shape: {data.shape!r}")
 
                 data_dset[j] = data 
 
 def get_cmb_realization(nside, cl_path, beams, frequencies, seed=100):
-    with h5py.File(str(cl_path), 'r') as f:
+    with h5py.File(f"{cl_path}", 'r') as f:
         cl_total = np.swapaxes(f['lensed_scalar'][...], 0, 1)
     cmb = hp.synfast(cl_total, nside, new=True, verbose=False)
     cmb = [hp.smoothing(cmb, fwhm=b / 60. * np.pi/180., verbose=False)[1:] * u.uK_CMB for b in beams]
