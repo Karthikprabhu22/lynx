@@ -87,6 +87,8 @@ def save_data(f, amplitude_output_shape, parameter_output_shape, arg):
     
 
 def do_fitting(args):
+    """ Function to carry out the fitting for a subset of the data.
+    """
     (patch_num, imc, indices, fitting_name, data, covariance, frequencies, model_path) = args
     logging.info(f"Fitting MC: {imc:d}")
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)

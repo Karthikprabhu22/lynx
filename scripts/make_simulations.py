@@ -33,7 +33,7 @@ _logger = logging.getLogger(__name__)
 
 
 @click.command()
-@click.option('-c', '--config', 'cfg_path', required=True,
+@click.option('-d', '--config', 'cfg_path', required=True,
               type=click.Path(exists=True), help='path to config file')
 @click.option('--quiet', 'log_level', flag_value=logging.WARNING, default=True)
 @click.option('-v', '--verbose', 'log_level', flag_value=logging.INFO)
