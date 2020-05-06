@@ -35,17 +35,25 @@ _logger = logging.getLogger(__name__)
                 type=click.Path(exists=False), help='path to model configuration')
 @click.option('-p', '--mask_path', 'mask_path', required=True,
                 type=click.Path(exists=False), help='path to masking configuration')
-@click.option('-c', '--cosmo_path', 'cosmo_path', required=True,
-                type=click.Path(exists=False), help='path to cosmo configuration')
+@click.option('-l', '--lkl_path', 'lkl_path', required=True,
+                type=click.Path(exists=False), help='path to cosmo likelihood configuration')
 @click.option('--quiet', 'log_level', flag_value=logging.WARNING, default=True)
 @click.option('-v', '--verbose', 'log_level', flag_value=logging.INFO)
 @click.option('-vv', '--very-verbose', 'log_level', flag_value=logging.DEBUG)
 @click.version_option(lynx.__version__)
-def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, log_level: int):
+def main(data_path: Path, mask_path: Path, model_path: Path, lkl_path: Path, log_level: int):
     logging.basicConfig(stream=sys.stdout,
                         level=log_level,
                         datefmt='%Y-%m-%d %H:%M',
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    with open(data_path) as f:
+        data_cfg = yaml.load(f, Loader=yaml.FullLoader)
+
+    hdf5_path = data_cfg['hdf5_path']
+
+    with open(lkl_path) as f:
+        lkl_cfg = yaml.load(f, Loader=yaml.FullLoader)
 
     masking = lynx.Masking(mask_path)
     
@@ -53,32 +61,21 @@ def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, l
 
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
 
-    with h5py.File(data_path, 'r') as f:
-        sky_config = yaml.load(f.attrs['config'], Loader=yaml.FullLoader)
-        nmc = sky_config['monte_carlo']
+    for mask_name, wsp, _, binning, _ in masking.get_powerspectrum_tools():
 
-    for mask_name, wsp, mask, binning, beam in masking.get_powerspectrum_tools():
+        for fitting_identifier, _ in fitting_masks:
 
-        for fitting_name, _ in fitting_masks:
-
-            results_dir = Path("data/results") / "_".join([mask_name, model_identifier, fitting_name])
+            results_dir = Path("data/results") / data_cfg['identifier'] / mask_name / fitting_identifier / model_identifier / lkl_cfg['identifier']
             results_dir.mkdir(exist_ok=True, parents=True)
 
-            cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
-            cln_bb_cov = np.zeros((int(nmc / 2), binning.get_n_bands(), binning.get_n_bands()))
-            for imc in np.arange(int(nmc / 2)):    
+            hdf5_record_cmb = str(Path(model_identifier) / fitting_identifier / 'spectra' / mask_name / 'cmb')
+            hdf5_record_dust = str(Path(model_identifier) / fitting_identifier / 'spectra' / mask_name / 'dustmbb')
 
-                hdf5_record = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc * 2) / 'powerspectra' / mask_name / 'cmb')
-
-                with h5py.File(data_path, 'r') as f:
-                    cl_mc[imc] = f[hdf5_record][...]
-                    #cln_bb_cov[imc] = f[hdf5_record + '_cln_cov'][...]
-
-
-            #cln_bb_cov = np.mean(cln_bb_cov, axis=0)
-
-            ee_mean, ee_cov = compute_mean_cov(cl_mc[:, 0])
-            bb_mean, bb_cov = compute_mean_cov(cl_mc[:, 3])
+            with h5py.File(hdf5_path, 'r') as f:
+                ee_mean, ee_cov = compute_mean_cov(f[hdf5_record_cmb][:, 0])
+                bb_mean, bb_cov = compute_mean_cov(f[hdf5_record_cmb][:, 3])
+                ee_mean_dust, ee_cov_dust = compute_mean_cov(f[hdf5_record_dust][:, 0])
+                bb_mean_dust, bb_cov_dust = compute_mean_cov(f[hdf5_record_dust][:, 3])
 
             bpw_windows = wsp.get_bandpower_windows()
             ee_bpw_windows = bpw_windows[0, :, 0, :]
@@ -105,25 +102,22 @@ def main(data_path: Path, mask_path: Path, model_path: Path, cosmo_path: Path, l
             ax.legend()
             fig.savefig(results_dir / "ee_recovered.pdf", bbox_inches='tight')
 
-            lnP = lynx.BBLogLike(data=(bb_mean, bb_cov), bpw_window_function=bb_bpw_windows, model_config_path=cosmo_path)
+            lnP = lynx.BBLogLike(data=(bb_mean, bb_cov), bpw_window_function=bb_bpw_windows, model_config_path=lkl_path)
             res = minimize(lnP, lnP.theta_0(), args=(True), method='Nelder-Mead')
 
             fig, ax = plt.subplots(1, 1)
             samples = np.random.multivariate_normal(res.x, lnP.covariance(res.x), 100)
             samples = np.array([lnP.model(sample) for sample in samples])
-            #samples += np.random.multivariate_normal(np.zeros_like(bpws), cln_bb_cov, 100)
-            pp_mean = np.mean(samples, axis=0)
-            pp_std = np.std(samples, axis=0)
-            ax.errorbar(bpws+1, pp_mean, color='C0', fmt='o', yerr=pp_std)
             for s in samples:
                 ax.plot(bpws, s, 'C1', alpha=0.1)
-            #for sample in samples:
-            #    ax.plot(bpws, lnP.model(sample) + , 'C1-', alpha=0.05)
+
+            ax.errorbar(bpws, bb_mean_dust, np.sqrt(np.diag(bb_cov_dust)), color='C1', fmt='o', label="Dust at 353 GHz")
+
             ax.plot(bpws, np.dot(bb_bpw_windows, bb), 'k-', label='Binned theory input')
             #ax.plot(bpws, np.sqrt(np.diag(cln_bb_cov)), 'g-', label=r'$\sigma(C_\ell^{\rm BB})$')
             ax.errorbar(bpws, bb_mean, np.sqrt(np.diag(bb_cov)), color='k', fmt='o', label='Cleaned estimate')
             ax.set_yscale('log')
-            ax.set_ylim(1e-7, 4e-6)
+            ax.set_ylim(1e-7, 4e-3)
             ax.set_xlabel(r"$\ell_b$")
             ax.set_ylabel(r"$C_{\ell_b}^{\rm BB}~[{\rm \mu K}^2]$")
             ax.legend()

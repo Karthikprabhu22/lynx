@@ -35,22 +35,18 @@ _logger = logging.getLogger(__name__)
 @click.command()
 @click.option('-c', '--config', 'cfg_path', required=True,
               type=click.Path(exists=True), help='path to config file')
-@click.option('-o', '--output_dir', 'output_dir', required=True,
-              type=click.Path(exists=False), help='path to config file')
-@click.option('-p', '--cosmo_path', 'cosmo_path', required=True,
-              type=click.Path(exists=True), help='path to cosmo config file')
 @click.option('--quiet', 'log_level', flag_value=logging.WARNING, default=True)
 @click.option('-v', '--verbose', 'log_level', flag_value=logging.INFO)
 @click.option('-vv', '--very-verbose', 'log_level', flag_value=logging.DEBUG)
 @click.version_option(lynx.__version__)
-def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
+def main(cfg_path: Path, log_level: int):
     logging.basicConfig(stream=sys.stdout,
                         level=log_level,
                         datefmt='%Y-%m-%d %H:%M',
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    with open(cfg_path) as file:
-        cfg = yaml.load(file, Loader=yaml.FullLoader)
+    with open(cfg_path) as f:
+        cfg = yaml.load(f, Loader=yaml.FullLoader)
 
     freqs = old_np.array(cfg['frequencies']) * u. GHz
     nside = cfg['nside']
@@ -58,8 +54,9 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
     sensitivities = cfg['sensitivities']
     nmc = cfg['monte_carlo']
     beams = cfg['fwhm']
-    outpath = (Path(output_dir).absolute() / cfg['name']).with_suffix('.h5')
+    outpath = cfg['hdf5_path']
     half_mission_noise = cfg['half_mission_noise']
+    cosmo_path = cfg['cosmo_path'])
     if half_mission_noise:
         sensitivities = [s * np.sqrt(2.) for s in sensitivities]
     
@@ -94,8 +91,11 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
         monte_carlo = maps.require_group('monte_carlo')
         components = maps.require_group('components')
 
-        cov_dset = monte_carlo.require_dataset('cov', shape=cov.shape, dtype=cov.dtype)
-        cov_dset[...] = cov
+        data_dset = monte_carlo.require_dataset('data', shape=(nmc, len(freqs), 2, hp.nside2npix(nside)), dtype=np.float32)
+
+        cov_dset = monte_carlo.require_dataset('cov', shape=(nmc, len(freqs), 2, hp.nside2npix(nside)), dtype=np.float32)
+        cov_dset[...] = cov.astype(np.float32)
+        
         for imc in np.arange(nmc)[::2]:
 
             logging.debug(r"""CMB MC: {:d}""".format(imc))
@@ -114,11 +114,10 @@ def main(cfg_path: Path, output_dir: Path, cosmo_path: Path, log_level: int):
                 data shape: {:s}
                 """.format(str(data.shape)))
 
-                data_dset = monte_carlo.require_dataset('data_mc{:04d}'.format(j), shape=data.shape, dtype=data.dtype)
-                data_dset[...] = data
+                data_dset[j] = data 
 
 def get_cmb_realization(nside, cl_path, beams, frequencies, seed=100):
-    with h5py.File(cl_path, 'r') as f:
+    with h5py.File(str(cl_path), 'r') as f:
         cl_total = np.swapaxes(f['lensed_scalar'][...], 0, 1)
     cmb = hp.synfast(cl_total, nside, new=True, verbose=False)
     cmb = [hp.smoothing(cmb, fwhm=b / 60. * np.pi/180., verbose=False)[1:] * u.uK_CMB for b in beams]

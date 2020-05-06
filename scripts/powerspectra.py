@@ -2,25 +2,16 @@
 # -*- coding: utf-8 -*-
 import logging
 from pathlib import Path
-import sys
-import yaml
-
 import click
-
 import h5py
 import yaml
-
 import lynx
+import sys
 import hoover
 import pymaster as nmt
-
-from scipy.optimize import minimize
-import emcee
-import healpy as hp 
+from scipy.optimize import minimize 
 import matplotlib.pyplot as plt
-
 import numpy as np
-
 from lynx import Masking
 
 _logger = logging.getLogger(__name__)
@@ -44,14 +35,16 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
                         datefmt='%Y-%m-%d %H:%M',
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
+    with open(data_path) as f:
+        data_cfg = yaml.load(f, Loader=yaml.FullLoader)
+
+    nmc = data_cfg['monte_carlo']
+    hdf5_path = data_cfg['hdf5_path']
+
     masking = lynx.Masking(mask_path)
     fitting_masks = list(masking.get_fitting_indices())
 
     model_identifier, lnP = hoover.LogProb.load_model_from_yaml(model_path)
-
-    with h5py.File(data_path, 'r') as f:
-        sky_config = yaml.load(f.attrs['config'], Loader=yaml.FullLoader)
-        nmc = sky_config['monte_carlo']
 
     for mask_name, wsp, mask, binning, beam in masking.get_powerspectrum_tools():
         # get the bandpower window function, which will be saved with the
@@ -68,65 +61,57 @@ def main(data_path: Path, model_path: Path, mask_path: Path, estimate_noise: boo
             Working on fitting scheme: {:s}
             """.format(fitting_name)) 
 
-            cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
+            hdf5_record_amp = Path(model_identifier) / fitting_name
+            hdf5_record_spec = hdf5_record_amp / 'spectra' / mask_name
+            
+            with h5py.File(hdf5_path, 'a') as f:
+                # Create a group which contains results for this sky
+                # patch, model, and MC realization.
+                spec = f.require_group(hdf5_record_spec.as_posix())
+                spec.attrs.update({'config': yaml.dump(masking.cfg)})
+                # save bandpower window function
+                dset = spec.require_dataset('bpw_window_function', shape=bpw_window_function.shape, dtype=bpw_window_function.dtype)
+                dset[...] = bpw_window_function
+                dset = spec.require_dataset('beam', shape=beam.shape, dtype=beam.dtype)
+                dset[...] = beam
 
-            for imc in np.arange(nmc)[::2]:
-                
-                jmc = imc + 1
-                
-                hdf5_record_1 = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(imc))
-                hdf5_record_2 = str(Path(model_identifier) / fitting_name / 'mc{:04d}'.format(jmc))
-
-                logging.info(r"""
-                Working on Monte Carlo realizations: {:d}, {:d}
-                """.format(imc, jmc))
-
-                logging.info(r"""
-                    Reading from: {:s}
-                    And from records: {:s}, {:s}
-                """.format(data_path, hdf5_record_1, hdf5_record_2))
-                
-                with h5py.File(data_path, 'a') as f:
-                    # Create a group which contains results for this sky
-                    # patch, model, and MC realization.
-                    opt = f[hdf5_record_1]
-                    spec = opt.require_group('powerspectra/{:s}'.format(mask_name))
-                    spec.attrs.update({'config': yaml.dump(masking.cfg)})
-                    # save bandpower window function
-                    dset = spec.require_dataset('bpw_window_function', shape=bpw_window_function.shape, dtype=bpw_window_function.dtype)
-                    dset[...] = bpw_window_function
-                    dset = spec.require_dataset('beam', shape=beam.shape, dtype=beam.dtype)
-                    dset[...] = beam
-                    # Create a dataset for the whole sky, and log the
-                    # results for this patch in the corresponding indices.
-                    # Do the same for the spectral parameters.
-                    for component in lnP._components:
-                        T_bar_1 = f[hdf5_record_1][component][...]
-                        T_bar_2 = f[hdf5_record_2][component][...]
-                        cl = compute_nmt_spectra(T_bar_1, T_bar_2, mask, wsp)
-                        cl_dset = spec.require_dataset(component, dtype=cl.dtype, shape=cl.shape)             
-                        cl_dset[...] = cl
+                # Create a dataset for the whole sky, and log the
+                # results for this patch in the corresponding indices.
+                # Do the same for the spectral parameters.
+                for component in lnP._components:
+                    cl_mc = np.zeros((int(nmc / 2), 4, binning.get_n_bands()))
+                    for ispec, imc in enumerate(np.arange(nmc)[::2]):
+                        jmc = imc + 1
+                        logging.info(r"""
+                        Working on Monte Carlo realizations: {:d}, {:d}
+                        """.format(imc, jmc))
+                        T_bar_1 = f[hdf5_record_amp.as_posix()][component][imc, ...]
+                        T_bar_2 = f[hdf5_record_amp.as_posix()][component][jmc, ...]
+                        cl_mc[ispec] = compute_nmt_spectra(T_bar_1, T_bar_2, mask, wsp)
 
                         if component == 'cmb':
-                            N_T_1 = f[hdf5_record_1]['cmb'+'_N_T'][...]
-                            N_T_2 = f[hdf5_record_2]['cmb'+'_N_T'][...]
+                            N_T_1 = f[hdf5_record_amp.as_posix()]['cmb'+'_N_T'][...]
+                            N_T_2 = f[hdf5_record_amp.as_posix()]['cmb'+'_N_T'][...]
 
                             noise_mc = 30
                             cl_n = np.zeros((noise_mc, binning.get_n_bands()))
 
-                            if estimate_noise:
+                    cl_dset = spec.require_dataset(component, dtype=cl_mc.dtype, shape=cl_mc.shape)             
+                    cl_dset[...] = cl_mc
+                
+                if estimate_noise:
 
-                                for k in range(noise_mc):
-                                    n1 = get_realization(N_T_1)
-                                    n2 = get_realization(N_T_2)
-                                    cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
+                    for k in range(noise_mc):
+                        n1 = get_realization(N_T_1)
+                        n2 = get_realization(N_T_2)
+                        cl_n[k] = compute_nmt_spectra(n1, n2, mask, wsp)[3]
 
-                                cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
+                    cl_n_mean, cl_n_cov = compute_mean_cov(cl_n)
 
-                                cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
-                                cl_n_dset[...] = cl_n_mean
-                                cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
-                                cl_n_dset[...] = cl_n_cov
+                    cl_n_dset = spec.require_dataset(component + '_cln_mean', dtype=cl_n_mean.dtype, shape=cl_n_mean.shape)
+                    cl_n_dset[...] = cl_n_mean
+                    cl_n_dset = spec.require_dataset(component + '_cln_cov', dtype=cl_n_cov.dtype, shape=cl_n_cov.shape)
+                    cl_n_dset[...] = cl_n_cov
 
 def compute_mean_cov(arr):
     assert arr.ndim == 2
@@ -136,7 +121,6 @@ def compute_mean_cov(arr):
     cov = diff[:, None, :] * diff[:, :, None]
     cov = np.sum(cov, axis=0) / nmc
     return mean, cov
-
         
 def get_realization(N_T):
     return np.random.randn(*N_T.shape) * np.sqrt(N_T)

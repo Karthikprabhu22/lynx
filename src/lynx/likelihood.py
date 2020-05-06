@@ -1,13 +1,12 @@
 import jax.numpy as np
 from jax import grad, hessian, jit
 import jax
-
 import camb
-
 from pathlib import Path
 import yaml
 import h5py
 
+__all__ = ['BBLogLike']
 class BBLogLike(object):
     """ Object to calculate the log likelihood of a 
     given set of cosmological parameters.
@@ -37,12 +36,6 @@ class BBLogLike(object):
         if ret_neg:
             return - lnp
         return lnp 
-
-    def __str__(self):
-        msg = r"""
-        Model
-        """
-        return msg
 
     def model(self, theta):
         pars = {k: v for k, v in zip(self.free_parameters, theta)}

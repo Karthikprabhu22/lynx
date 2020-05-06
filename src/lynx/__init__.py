@@ -10,5 +10,5 @@ except DistributionNotFound:
 finally:
     del get_distribution, DistributionNotFound
 
-from .lynx import Masking
+from .masking import Masking
 from .likelihood import BBLogLike
