@@ -4,14 +4,14 @@ model:
   dustmbb:
     fixed:
       # reference frequency in GHz
-      nu_ref_d: 353.
+      nu_ref_d: 270.
       # temperature in K
       T_d: 20.
     varied:
       beta_d: [1.5, 0.5]
   syncpl:
     fixed:
-      nu_ref_s: 23.
+      nu_ref_s: 30.
     varied:
       beta_s: [-3., 0.1]
   cmb:

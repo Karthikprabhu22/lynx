@@ -1,0 +1,29 @@
+# The name of the simulation setup, this is
+# used to label the output maps in an hdf5 record.
+identifier: 'cmbs4_hm'
+hdf5_path: 'data/interim/cmbs4_hm.h5'
+# nside at which to generate the simulations
+nside: 512
+#lmax upto which you want to retain alms for reconvolution
+lmax: 500
+
+#fwhm of the common beam
+common_fwhm: 60.
+
+# frequencies at which to generate maps.
+frequencies: [30., 40., 85., 95., 145., 155., 220., 270.]
+
+# sensitivities of each channel in uK_CMB amin.
+sensitivities: [8.67, 8.22, 1.64, 1.30, 2.03, 2.03, 5.19, 7.08]
+
+# Gaussian beam fwhm in arcmin
+fwhm: [76.6, 57.5, 27.0, 24.2, 15.9, 14.8, 10.7, 8.5]
+
+monte_carlo: 10 
+half_mission_noise: True
+#maps_path: '/project/projectdirs/cmbs4/data_xx.yy/04.00/' 
+maps_path: '/global/homes/k/kp22/data/'
+mask_path: '/global/homes/k/kp22/lynx/data/interim/'
+noise_path: '/project/projectdirs/cmbs4/data_xx.yy/04.00/' 
+gdust_path: '/project/projectdirs/cmbs4/sky_yy/00/gdust/map/' 
+gsync_path: '/project/projectdirs/cmbs4/sky_yy/00/gsync/map/' 

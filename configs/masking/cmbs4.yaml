@@ -1,0 +1,24 @@
+hdf5_path: data/interim/n0512.h5
+nside: 512
+masks:
+  fitting:
+    one:
+      record: /ns0512/binary
+  powerspectrum:
+    linear_lmin30lmax383:
+      record: /ns0512/apodized/basic
+      nmt_apo:
+        args:
+          apotype: 'C2'
+          aposize: 5
+      nmt_wsp:
+        path: data/interim/basic_wsp.fits
+      nmt_field:
+        args:
+          purify_b: True
+          purify_e: False
+          beam: 60.
+      nmt_bin:
+        args:
+          ell_ini: [ 30,  65, 100, 135, 170, 205, 240, 275, 310, 345, 380, 415, 450, 485]
+          ell_end: [ 64,  99, 134, 169, 204, 239, 274, 309, 344, 379, 414, 449, 484, 519]
