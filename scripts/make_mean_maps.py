@@ -77,7 +77,7 @@ def main(cfg_path: Path, log_level: int):
     new_beam_fwhm = cfg['common_fwhm']
     
     nmc = 5
-    outpath = 'data/mean_maps.h5'
+    outpath = 'data/interim/mean_maps.h5'
     realizations = ["0000","0002","0004","0006","0008"]
     freq = ["f030_b77","f040_b58","f085_b27","f095_b24","f145_b16","f155_b15","f220_b11","f270_b08"]
 
